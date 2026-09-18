@@ -1,0 +1,215 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>RAG PDF Assistant</title>
+  <style>
+    :root {
+      --bg: #0f172a;
+      --panel: #1e293b;
+      --panel-2: #273449;
+      --accent: #38bdf8;
+      --text: #e2e8f0;
+      --muted: #94a3b8;
+      --border: #334155;
+    }
+    * { box-sizing: border-box; }
+    body {
+      margin: 0;
+      font-family: system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+      background: var(--bg);
+      color: var(--text);
+      min-height: 100vh;
+    }
+    .wrap { max-width: 900px; margin: 0 auto; padding: 32px 20px 64px; }
+    header h1 { margin: 0 0 4px; font-size: 1.6rem; }
+    header p { margin: 0 0 24px; color: var(--muted); }
+    .card {
+      background: var(--panel);
+      border: 1px solid var(--border);
+      border-radius: 12px;
+      padding: 20px;
+      margin-bottom: 20px;
+    }
+    .row { display: flex; gap: 12px; flex-wrap: wrap; align-items: center; }
+    button {
+      background: var(--accent);
+      color: #082f49;
+      border: none;
+      border-radius: 8px;
+      padding: 10px 18px;
+      font-weight: 600;
+      cursor: pointer;
+      font-size: 0.95rem;
+    }
+    button:hover { filter: brightness(1.1); }
+    button:disabled { opacity: 0.5; cursor: not-allowed; }
+    button.secondary { background: var(--panel-2); color: var(--text); border: 1px solid var(--border); }
+    textarea {
+      width: 100%;
+      min-height: 90px;
+      resize: vertical;
+      background: var(--panel-2);
+      color: var(--text);
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      padding: 12px;
+      font-family: inherit;
+      font-size: 1rem;
+    }
+    textarea:focus, input:focus { outline: 2px solid var(--accent); }
+    .status { color: var(--muted); font-size: 0.9rem; margin-top: 10px; }
+    .answer {
+      white-space: pre-wrap;
+      line-height: 1.55;
+      background: var(--panel-2);
+      border-radius: 8px;
+      padding: 16px;
+      margin-top: 16px;
+    }
+    .sources { margin-top: 16px; }
+    .source {
+      border-left: 3px solid var(--accent);
+      padding: 8px 12px;
+      margin-bottom: 8px;
+      color: var(--muted);
+      font-size: 0.88rem;
+    }
+    .source strong { color: var(--text); }
+    .badge {
+      display: inline-block;
+      background: var(--panel-2);
+      border: 1px solid var(--border);
+      border-radius: 999px;
+      padding: 2px 10px;
+      font-size: 0.8rem;
+      color: var(--muted);
+      margin-right: 6px;
+    }
+    .hidden { display: none; }
+    .spinner { display: inline-block; animation: spin 1s linear infinite; }
+    @keyframes spin { to { transform: rotate(360deg); } }
+  </style>
+</head>
+<body>
+  <div class="wrap">
+    <header>
+      <h1>RAG PDF Assistant</h1>
+      <p>Загрузите PDF, проиндексируйте и задавайте вопросы по его содержимому.</p>
+    </header>
+
+    <div class="card">
+      <div class="row">
+        <input type="file" id="fileInput" accept="application/pdf" />
+        <button id="uploadBtn" class="secondary">Загрузить и проиндексировать</button>
+        <button id="ingestBtn" class="secondary">Индексировать data/</button>
+      </div>
+      <div class="status" id="ingestStatus"></div>
+      <div class="status" id="stats"></div>
+    </div>
+
+    <div class="card">
+      <textarea id="question" placeholder="Например: о чём этот документ? Какие ключевые выводы?"></textarea>
+      <div class="row" style="margin-top:12px">
+        <button id="askBtn">Спросить</button>
+        <span class="status" id="askStatus"></span>
+      </div>
+      <div id="result" class="hidden">
+        <div class="answer" id="answer"></div>
+        <div class="sources" id="sources"></div>
+      </div>
+    </div>
+  </div>
+
+  <script>
+    const $ = (id) => document.getElementById(id);
+
+    async function refreshStats() {
+      try {
+        const res = await fetch("/api/stats");
+        const data = await res.json();
+        const files = (data.files || []).map(f => `<span class="badge">${f}</span>`).join("");
+        $("stats").innerHTML = `Чанков в базе: <strong>${data.chunks}</strong><br/>${files || "Документы не проиндексированы."}`;
+      } catch (e) {
+        $("stats").textContent = "Не удалось получить статистику.";
+      }
+    }
+
+    async function ingestFolder() {
+      $("ingestBtn").disabled = true;
+      $("ingestStatus").textContent = "Индексация...";
+      try {
+        const res = await fetch("/api/ingest", { method: "POST" });
+        const data = await res.json();
+        $("ingestStatus").textContent = data.detail || data.message || "Готово.";
+      } catch (e) {
+        $("ingestStatus").textContent = "Ошибка индексации.";
+      } finally {
+        $("ingestBtn").disabled = false;
+        refreshStats();
+      }
+    }
+
+    async function uploadFile() {
+      const input = $("fileInput");
+      if (!input.files.length) {
+        $("ingestStatus").textContent = "Выберите PDF-файл.";
+        return;
+      }
+      const form = new FormData();
+      form.append("file", input.files[0]);
+      $("uploadBtn").disabled = true;
+      $("ingestStatus").textContent = "Загрузка и индексация...";
+      try {
+        const res = await fetch("/api/upload", { method: "POST", body: form });
+        const data = await res.json();
+        $("ingestStatus").textContent = res.ok
+          ? `Файл "${data.uploaded}" проиндексирован (${data.chunks} чанков).`
+          : (data.detail || "Ошибка загрузки.");
+      } catch (e) {
+        $("ingestStatus").textContent = "Ошибка загрузки.";
+      } finally {
+        $("uploadBtn").disabled = false;
+        refreshStats();
+      }
+    }
+
+    async function ask() {
+      const question = $("question").value.trim();
+      if (!question) return;
+      $("askBtn").disabled = true;
+      $("askStatus").innerHTML = '<span class="spinner">◌</span> Думаю...';
+      $("result").classList.add("hidden");
+      try {
+        const res = await fetch("/api/ask", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ question }),
+        });
+        const data = await res.json();
+        if (!res.ok) throw new Error(data.detail || "Ошибка");
+        $("answer").textContent = data.answer;
+        $("sources").innerHTML = (data.sources || []).map(s =>
+          `<div class="source"><strong>${s.file || "документ"}${s.page ? ", стр. " + s.page : ""}</strong><br/>${s.preview || ""}…</div>`
+        ).join("");
+        $("result").classList.remove("hidden");
+        $("askStatus").textContent = "";
+      } catch (e) {
+        $("askStatus").textContent = "Ошибка: " + e.message;
+      } finally {
+        $("askBtn").disabled = false;
+      }
+    }
+
+    $("askBtn").addEventListener("click", ask);
+    $("ingestBtn").addEventListener("click", ingestFolder);
+    $("uploadBtn").addEventListener("click", uploadFile);
+    $("question").addEventListener("keydown", (e) => {
+      if (e.key === "Enter" && (e.ctrlKey || e.metaKey)) ask();
+    });
+
+    refreshStats();
+  </script>
+</body>
+</html>

@@ -1,0 +1,21 @@
+# --- Web / API ---
+fastapi>=0.115
+uvicorn[standard]>=0.30
+python-multipart>=0.0.9
+python-dotenv>=1.0
+pydantic>=2.7
+
+# --- LangChain ---
+langchain>=0.3
+langchain-core>=0.3
+langchain-community>=0.3
+langchain-chroma>=0.2
+langchain-text-splitters>=0.3
+
+# --- Провайдеры моделей ---
+langchain-openai>=0.2
+langchain-ollama>=0.2
+
+# --- Векторная база и загрузка PDF ---
+chromadb>=0.5
+pypdf>=5.0
